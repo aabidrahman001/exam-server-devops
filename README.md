@@ -1,7 +1,6 @@
 # Documentaion 
-# exam-server-devops
+# exam-server-devops (I used minikube but can be done using k3s/microk8s as well)
 Cloud-native Exam Results System with PostgreSQL, Kubernetes, CI/CD, and Observability
-- **Project Details is available [here](docs/task-details/DevOps%20Task%20Details.pdf).**
 - **TDD is available [here](docs/task-details/Documentation.pdf).**
 
 ## The Scenario
