@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: exam-server
+spec:
+  serviceName: "postgres-service"
+  replicas: 2
+  podManagementPolicy: OrderedReady
+  revisionHistoryLimit: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      initContainers:
+      - name: copy-config
+        image: postgres:14
+        command:
+        - sh
+        - -c
+        - |
+          if [ ! -f /var/lib/postgresql/data/pgdata/pg_hba.conf ]; then
+            mkdir -p /var/lib/postgresql/data/pgdata
+            cp /config/pg_hba.conf /var/lib/postgresql/data/pgdata/pg_hba.conf
+            chown postgres:postgres /var/lib/postgresql/data/pgdata/pg_hba.conf
+          fi
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+      - name: setup-replica
+        image: postgres:14
+        command:
+        - sh
+        - -c
+        - |
+          if [ "$(hostname)" != "postgres-0" ]; then
+            rm -rf /var/lib/postgresql/data/pgdata/*
+            mkdir -p /var/lib/postgresql/data/pgdata
+            chown -R postgres:postgres /var/lib/postgresql/data/pgdata
+            
+            until pg_isready -h postgres-0.postgres-service.exam-server.svc.cluster.local -p 5432; do
+              echo "Waiting for master to be ready..."
+              sleep 5
+            done
+            until pg_basebackup -h postgres-0.postgres-service.exam-server.svc.cluster.local \
+                                -D /var/lib/postgresql/data/pgdata \
+                                -U replica -v -P -R; do
+              echo "Waiting for master backup..."
+              sleep 5
+            done
+          fi
+        env:
+        - name: PGPASSWORD
+          value: replica123
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+      containers:
+      - name: postgres
+        image: postgres:14
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: exam_server_BD
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          value: postgres123
+        - name: POSTGRES_REPLICATION_USER
+          value: replica
+        - name: POSTGRES_REPLICATION_PASSWORD
+          value: replica123
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-config
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      storageClassName: standard
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi

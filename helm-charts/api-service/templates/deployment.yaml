@@ -1,0 +1,115 @@
+# Deployment for Write API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "api-service.fullname" . }}-write
+spec:
+  replicas: {{ .Values.replicaCountWrite }}
+  strategy:
+    type: {{ .Values.strategy.type }}
+    rollingUpdate:
+      maxSurge: {{ .Values.strategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.strategy.rollingUpdate.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "api-service.fullname" . }}-write
+  template:
+    metadata:
+      labels:
+        app: {{ include "api-service.fullname" . }}-write
+    spec:
+      containers:
+        - name: api-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.datasource.write.url | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.datasource.write.username | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: {{ .Values.datasource.write.password | quote }}
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: {{ .Values.datasource.write.hibernateDdlAuto | quote }}
+
+---
+
+# Deployment for Read API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "api-service.fullname" . }}-read
+spec:
+  replicas: {{ .Values.replicaCountRead }}
+  strategy:
+    type: {{ .Values.strategy.type }}
+    rollingUpdate:
+      maxSurge: {{ .Values.strategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.strategy.rollingUpdate.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "api-service.fullname" . }}-read
+  template:
+    metadata:
+      labels:
+        app: {{ include "api-service.fullname" . }}-read
+    spec:
+      containers:
+        - name: api-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.datasource.read.url | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.datasource.read.username | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: {{ .Values.datasource.read.password | quote }}
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: {{ .Values.datasource.read.hibernateDdlAuto | quote }}
+
+---
+
+#Horizontal Scaling for Read
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "api-service.fullname" . }}-read-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "api-service.fullname" . }}-read
+  minReplicas: {{ .Values.autoscaling.minReplicas | default 5 }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas | default 20 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage | default 60 }}
+
+---
+
+#Horizontal Scaling for Write
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "api-service.fullname" . }}-write-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "api-service.fullname" . }}-write
+  minReplicas: {{ .Values.autoscaling.write.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.autoscaling.write.maxReplicas | default 3 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.write.targetCPUUtilizationPercentage | default 70 }}

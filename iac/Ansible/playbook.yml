@@ -1,0 +1,180 @@
+---
+- name: Install Docker
+  hosts: all
+  become: true
+  tasks:
+    - name: Set mydistribution
+      ansible.builtin.set_fact:
+        mydistribution: "{{ 'rhel' if (ansible_distribution == 'Red Hat Enterprise Linux') else (ansible_distribution | lower) }}"
+        
+    - name: Add signing key (Debian/Ubuntu)
+      ansible.builtin.apt_key:
+        url: "https://download.docker.com/linux/{{ mydistribution }}/gpg"
+        state: present
+      when: ansible_distribution in ['Ubuntu', 'Debian']
+    
+    - name: Add signing key (RHEL/CentOS)
+      ansible.builtin.rpm_key:
+        key: "https://download.docker.com/linux/{{ mydistribution }}/gpg"
+        state: present
+      when: ansible_distribution in ['Red Hat Enterprise Linux', 'CentOS']
+
+    - name: Add Docker repository (Debian/Ubuntu)
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/{{ mydistribution }} {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
+      when: ansible_distribution in ['Ubuntu', 'Debian']
+
+    - name: Add Docker repository (RHEL/CentOS)
+      ansible.builtin.yum_repository:
+        name: docker
+        description: docker repository
+        baseurl: "https://download.docker.com/linux/{{ mydistribution }}/$releasever/$basearch/stable"
+        enabled: true
+        gpgcheck: true
+        gpgkey: "https://download.docker.com/linux/{{ mydistribution }}/gpg"
+      when: ansible_distribution in ['Red Hat Enterprise Linux', 'CentOS']
+
+    - name: Install Docker (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: latest
+        update_cache: yes
+      when: ansible_distribution in ['Ubuntu', 'Debian']
+
+    - name: Install Docker (RHEL/CentOS)
+      ansible.builtin.yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: latest
+        update_cache: yes
+      when: ansible_distribution in ['Red Hat Enterprise Linux', 'CentOS']
+
+    - name: Start Docker
+      ansible.builtin.service:
+        name: "docker"
+        enabled: true
+        state: started
+
+---
+
+- name: Provision Kubernetes environment
+  hosts: all
+  become: true
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - curl
+          - apt-transport-https
+          - ca-certificates
+          - conntrack
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Minikube
+      shell: |
+        curl -Lo /usr/local/bin/minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        chmod +x /usr/local/bin/minikube
+      args:
+        creates: /usr/local/bin/minikube
+
+    - name: Install kubectl
+      shell: |
+        curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
+        chmod +x /usr/local/bin/kubectl
+      args:
+        creates: /usr/local/bin/kubectl
+
+    - name: Install Helm
+      shell: |
+        curl -Lo /tmp/helm.tar.gz https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz
+        tar -zxvf /tmp/helm.tar.gz -C /tmp
+        mv /tmp/linux-amd64/helm /usr/local/bin/helm
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Start Minikube with Docker driver
+      shell: |
+        minikube start --driver=docker --force
+      environment:
+        KUBECONFIG: /root/.kube/config
+      args:
+        creates: /root/.minikube
+
+    - name: Copy Kubernetes manifests
+      copy:
+        src: ./k8s/
+        dest: /tmp/k8s/
+
+    - name: Deploy Postgres
+      shell: |
+        kubectl apply -f /tmp/k8s/postgres-statefulset.yaml
+        kubectl apply -f /tmp/k8s/postgres-service.yaml
+      environment:
+        KUBECONFIG: /root/.kube/config
+
+    - name: Add Helm repos for Prometheus & Grafana
+      shell: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo add grafana https://grafana.github.io/helm-charts
+        helm repo update
+      args:
+        creates: /root/.cache/helm
+
+    - name: Install Prometheus
+      shell: |
+        helm install prometheus prometheus-community/prometheus --namespace monitoring --create-namespace
+      environment:
+        KUBECONFIG: /root/.kube/config
+
+    - name: Install Grafana
+      shell: |
+        helm install grafana grafana/grafana --namespace monitoring
+      environment:
+        KUBECONFIG: /root/.kube/config
+
+    - name: Expose Grafana as NodePort
+      shell: |
+        kubectl expose deployment grafana --type=NodePort --name=grafana-svc --namespace monitoring --port=3000
+      environment:
+        KUBECONFIG: /root/.kube/config
+      ignore_errors: yes
+
+---
+
+- name: Setup user
+  hosts: all
+  become: true
+  vars:
+    aabid_password: "{{ 'PASSWORD' | password_hash('sha512') }}"
+  tasks:
+    - name: Add a new user named aabid
+      user:
+        name: aabid
+        shell: /bin/bash
+        password: "{{ aabid_password }}"
+
+    - name: Add aabid user to the sudoers
+      copy:
+        dest: "/etc/sudoers.d/aabid"
+        content: "aabid  ALL=(ALL)  NOPASSWD: ALL"
+
+    - name: Deploy SSH Key
+      authorized_key:
+        user: aabid
+        key: "{{ lookup('file', '/home/aabid/.ssh/sshkey.pub') }}"
+        state: present
+
+  handlers:
+    - name: restart ssh
+      service:
+        name: sshd
+        state: restarted
+

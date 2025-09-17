@@ -1,0 +1,28 @@
+# Service for Write API
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "api-service.fullname" . }}-write
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "api-service.fullname" . }}-write
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+# Service for Read API
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "api-service.fullname" . }}-read
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "api-service.fullname" . }}-read
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

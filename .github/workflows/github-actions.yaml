@@ -1,0 +1,68 @@
+name: github-actions
+run-name: ${{ github.actor }} is rolling out CI/CD for Api-service
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: echo "The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - run: echo "The ${{ github.repository }} repository has been cloned to the runner."
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build API
+        run: ./mvnw clean package -DskipTests
+        working-directory: ./api-service
+
+      - name: Set up Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          driver: docker
+          start: true
+          wait:
+
+      - name: Set kubectl from Minikube
+        run: |
+          alias kubectl="minikube kubectl --"
+          kubectl version
+
+      - name: Set KUBECTL alias
+        run: echo "alias kubectl='minikube kubectl --'" >> $GITHUB_ENV
+        
+      - name: Configure kubectl to use Minikube
+        run: kubectl config use-context minikube
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.17.4'
+
+      - name: Build Docker image
+        run: docker build -t aabidrahman/api-service:latest ./api-service
+
+      - name: Load Docker image into Minikube
+        run: minikube image load aabidrahman/api-service:latest
+
+      - name: Helm Upgrade/Install
+        run: |
+          kubectl create namespace exam-server || echo "Namespace exists"
+          helm upgrade --install api-service ./helm-charts/api-service/ \
+            --namespace exam-server \
+            --set image.repository=aabidrahman/api-service \
+            --set image.tag=latest
+
+      - run: echo "This job's status is ${{ job.status }}."

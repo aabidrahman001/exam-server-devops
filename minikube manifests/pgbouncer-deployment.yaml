@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: exam-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+      - name: pgbouncer
+        image: edoburu/pgbouncer
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: pgbouncer-config
+          mountPath: /etc/pgbouncer
+      volumes:
+      - name: pgbouncer-config
+        configMap:
+          name: pgbouncer-config
